@@ -1,0 +1,488 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { base44 } from '@/api/base44Client';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import Icon from '@/components/shared/Icon';
+import LevelUpNotification from '@/components/shared/LevelUpNotification';
+
+const XP_PER_LEVEL = 500;
+
+const formatDate = (dateStr) => {
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+};
+
+const isToday = (dateStr) => {
+  const today = new Date().toISOString().split('T')[0];
+  return dateStr === today;
+};
+
+// Task Modal Component
+const TaskModal = ({ isOpen, onClose, onAddTask }) => {
+  const [formData, setFormData] = useState({
+    title: '',
+    duration: 30,
+    difficulty: 'Medium',
+    category: 'Work',
+    due_date: new Date().toISOString().split('T')[0]
+  });
+
+  const multipliers = { 'Easy': 1, 'Medium': 2, 'Hard': 4, 'Elite': 8 };
+  const calculatedXP = Math.round(formData.duration * (multipliers[formData.difficulty] || 1));
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!formData.title.trim()) return;
+    onAddTask({ ...formData, xp: calculatedXP });
+    setFormData({ title: '', duration: 30, difficulty: 'Medium', category: 'Work', due_date: new Date().toISOString().split('T')[0] });
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-neutral-900/60 backdrop-blur-md"
+    >
+      <motion.div
+        initial={{ scale: 0.9, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.9, y: 20 }}
+        className="bg-white w-full max-w-md rounded-[40px] overflow-hidden shadow-2xl"
+      >
+        <div className="px-8 pt-8 pb-4 flex justify-between items-center">
+          <h2 className="text-2xl font-extrabold tracking-tight text-neutral-900">New Task</h2>
+          <button onClick={onClose} className="p-2 hover:bg-neutral-100 rounded-full transition-colors">
+            <Icon name="X" className="w-5 h-5 text-neutral-400" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-8 pb-8 space-y-6">
+          <div>
+            <label className="block text-[10px] font-extrabold text-neutral-400 uppercase tracking-widest mb-2 ml-1">Task Title</label>
+            <input
+              autoFocus
+              className="w-full px-6 py-4 bg-neutral-50 border border-neutral-100 rounded-[20px] focus:outline-none focus:ring-2 focus:ring-neutral-900 text-base font-semibold"
+              placeholder="What's the focus?"
+              value={formData.title}
+              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[10px] font-extrabold text-neutral-400 uppercase tracking-widest mb-2 ml-1">Duration (Min)</label>
+              <input
+                type="number"
+                className="w-full px-6 py-3.5 bg-neutral-50 border border-neutral-100 rounded-[20px] focus:outline-none text-sm font-bold"
+                value={formData.duration}
+                onChange={(e) => setFormData({ ...formData, duration: parseInt(e.target.value) || 30 })}
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-extrabold text-neutral-400 uppercase tracking-widest mb-2 ml-1">Due Date</label>
+              <input
+                type="date"
+                className="w-full px-4 py-3.5 bg-neutral-50 border border-neutral-100 rounded-[20px] focus:outline-none text-sm font-bold"
+                value={formData.due_date}
+                onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] font-extrabold text-neutral-400 uppercase tracking-widest mb-3 ml-1">Difficulty</label>
+            <div className="flex gap-2">
+              {['Easy', 'Medium', 'Hard', 'Elite'].map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setFormData({ ...formData, difficulty: d })}
+                  className={`flex-1 py-3 rounded-2xl text-xs font-bold transition-all ${
+                    formData.difficulty === d
+                      ? 'bg-neutral-900 text-white'
+                      : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'
+                  }`}
+                >
+                  {d}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] font-extrabold text-neutral-400 uppercase tracking-widest mb-3 ml-1">Category</label>
+            <div className="flex gap-2">
+              {['Work', 'Personal', 'Health', 'Learning'].map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setFormData({ ...formData, category: c })}
+                  className={`flex-1 py-3 rounded-2xl text-xs font-bold transition-all ${
+                    formData.category === c
+                      ? 'bg-neutral-900 text-white'
+                      : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'
+                  }`}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="pt-4 flex items-center justify-between">
+            <div className="flex items-center gap-2 bg-amber-50 px-4 py-2 rounded-full">
+              <Icon name="Zap" className="w-4 h-4 text-amber-500 fill-amber-500" />
+              <span className="text-sm font-black text-amber-700">+{calculatedXP} XP</span>
+            </div>
+            <button
+              type="submit"
+              className="px-8 py-4 bg-neutral-900 text-white font-bold rounded-[20px] hover:bg-neutral-800 transition-colors"
+            >
+              Create Task
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </motion.div>
+  );
+};
+
+export default function Home() {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showLevelUp, setShowLevelUp] = useState(false);
+  const [newLevel, setNewLevel] = useState(1);
+  const queryClient = useQueryClient();
+
+  // Fetch tasks
+  const { data: tasks = [] } = useQuery({
+    queryKey: ['tasks'],
+    queryFn: () => base44.entities.Task.list('-created_date', 100)
+  });
+
+  // Fetch or create user progress
+  const { data: userProgress, refetch: refetchProgress } = useQuery({
+    queryKey: ['userProgress'],
+    queryFn: async () => {
+      const progress = await base44.entities.UserProgress.list();
+      if (progress.length === 0) {
+        const newProgress = await base44.entities.UserProgress.create({
+          total_xp: 0,
+          current_level: 1,
+          current_streak: 0,
+          longest_streak: 0,
+          total_tasks_completed: 0,
+          total_focus_minutes: 0,
+          earned_badges: [],
+          last_active_date: new Date().toISOString().split('T')[0]
+        });
+        return newProgress;
+      }
+      return progress[0];
+    }
+  });
+
+  // Create task mutation
+  const createTaskMutation = useMutation({
+    mutationFn: (taskData) => base44.entities.Task.create({
+      ...taskData,
+      completed: false
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    }
+  });
+
+  // Complete task mutation
+  const completeTaskMutation = useMutation({
+    mutationFn: async (task) => {
+      await base44.entities.Task.update(task.id, {
+        completed: true,
+        completed_date: new Date().toISOString().split('T')[0]
+      });
+      
+      if (userProgress) {
+        const newXP = (userProgress.total_xp || 0) + (task.xp || 0);
+        const currentLevel = userProgress.current_level || 1;
+        const newLevel = Math.floor(newXP / XP_PER_LEVEL) + 1;
+        
+        await base44.entities.UserProgress.update(userProgress.id, {
+          total_xp: newXP,
+          current_level: newLevel,
+          total_tasks_completed: (userProgress.total_tasks_completed || 0) + 1,
+          total_focus_minutes: (userProgress.total_focus_minutes || 0) + (task.duration || 0),
+          last_active_date: new Date().toISOString().split('T')[0]
+        });
+        
+        if (newLevel > currentLevel) {
+          setNewLevel(newLevel);
+          setShowLevelUp(true);
+        }
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['userProgress'] });
+    }
+  });
+
+  const todayTasks = useMemo(() => {
+    return tasks.filter(t => !t.completed && isToday(t.due_date));
+  }, [tasks]);
+
+  const upcomingTasks = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    return tasks.filter(t => !t.completed && t.due_date > today).slice(0, 5);
+  }, [tasks]);
+
+  const recentlyCompleted = useMemo(() => {
+    return tasks.filter(t => t.completed).slice(0, 3);
+  }, [tasks]);
+
+  const level = userProgress?.current_level || 1;
+  const xp = userProgress?.total_xp || 0;
+  const streak = userProgress?.current_streak || 0;
+  const xpProgress = ((xp % XP_PER_LEVEL) / XP_PER_LEVEL) * 100;
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-8 md:py-12">
+      <AnimatePresence>
+        {showLevelUp && (
+          <LevelUpNotification level={newLevel} onClose={() => setShowLevelUp(false)} />
+        )}
+        {isModalOpen && (
+          <TaskModal
+            isOpen={isModalOpen}
+            onClose={() => setIsModalOpen(false)}
+            onAddTask={(taskData) => createTaskMutation.mutate(taskData)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight text-neutral-900">Dashboard</h1>
+          <p className="text-neutral-500 mt-1">Stay focused, earn rewards.</p>
+        </div>
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setIsModalOpen(true)}
+          className="flex items-center gap-2 px-6 py-3 bg-neutral-900 text-white font-bold rounded-full shadow-lg hover:bg-neutral-800 transition-colors"
+        >
+          <Icon name="Plus" className="w-5 h-5" />
+          <span className="hidden sm:inline">New Task</span>
+        </motion.button>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white border border-neutral-100 p-5 rounded-3xl shadow-sm"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <div className="p-2 bg-amber-50 rounded-xl">
+              <Icon name="Zap" className="w-5 h-5 text-amber-500 fill-amber-500" />
+            </div>
+          </div>
+          <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">Total XP</p>
+          <h4 className="text-2xl font-extrabold text-neutral-900 mt-1">{xp}</h4>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="bg-white border border-neutral-100 p-5 rounded-3xl shadow-sm"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <div className="p-2 bg-indigo-50 rounded-xl">
+              <Icon name="Trophy" className="w-5 h-5 text-indigo-500" />
+            </div>
+          </div>
+          <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">Level</p>
+          <h4 className="text-2xl font-extrabold text-neutral-900 mt-1">{level}</h4>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="bg-white border border-neutral-100 p-5 rounded-3xl shadow-sm"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <div className="p-2 bg-orange-50 rounded-xl">
+              <Icon name="Flame" className="w-5 h-5 text-orange-500" />
+            </div>
+          </div>
+          <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">Streak</p>
+          <h4 className="text-2xl font-extrabold text-neutral-900 mt-1">{streak} days</h4>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="bg-white border border-neutral-100 p-5 rounded-3xl shadow-sm"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <div className="p-2 bg-green-50 rounded-xl">
+              <Icon name="CheckCircle2" className="w-5 h-5 text-green-500" />
+            </div>
+          </div>
+          <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">Today</p>
+          <h4 className="text-2xl font-extrabold text-neutral-900 mt-1">{todayTasks.length} tasks</h4>
+        </motion.div>
+      </div>
+
+      {/* Level Progress */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4 }}
+        className="bg-neutral-900 text-white p-6 rounded-3xl mb-8"
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <p className="text-neutral-400 text-sm font-medium">Level {level} Progress</p>
+            <h3 className="text-2xl font-extrabold">{xp % XP_PER_LEVEL} / {XP_PER_LEVEL} XP</h3>
+          </div>
+          <div className="w-16 h-16 bg-amber-400 rounded-2xl flex items-center justify-center rotate-12">
+            <span className="text-2xl font-black text-neutral-900">{level}</span>
+          </div>
+        </div>
+        <div className="w-full h-3 bg-neutral-800 rounded-full overflow-hidden">
+          <motion.div
+            initial={{ width: 0 }}
+            animate={{ width: `${xpProgress}%` }}
+            transition={{ duration: 1 }}
+            className="h-full bg-amber-400 rounded-full"
+          />
+        </div>
+        <p className="text-neutral-400 text-sm mt-2">{XP_PER_LEVEL - (xp % XP_PER_LEVEL)} XP until next level</p>
+      </motion.div>
+
+      {/* Today's Tasks */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-neutral-900">Today's Focus</h2>
+          <span className="text-sm text-neutral-500">{todayTasks.length} tasks</span>
+        </div>
+        
+        {todayTasks.length === 0 ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="bg-white border border-neutral-100 p-8 rounded-3xl text-center"
+          >
+            <div className="w-16 h-16 bg-neutral-100 rounded-2xl mx-auto mb-4 flex items-center justify-center">
+              <Icon name="CheckCircle2" className="w-8 h-8 text-neutral-400" />
+            </div>
+            <p className="text-neutral-500 font-medium">No tasks for today</p>
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="mt-4 px-6 py-2 bg-neutral-900 text-white font-bold rounded-full text-sm hover:bg-neutral-800 transition-colors"
+            >
+              Add Your First Task
+            </button>
+          </motion.div>
+        ) : (
+          <div className="space-y-3">
+            {todayTasks.map((task) => (
+              <motion.div
+                key={task.id}
+                layout
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="bg-white border border-neutral-100 p-5 rounded-2xl shadow-sm flex items-center justify-between group hover:border-neutral-200 transition-colors"
+              >
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => completeTaskMutation.mutate(task)}
+                    className="w-8 h-8 rounded-full border-2 border-neutral-200 flex items-center justify-center hover:border-green-500 hover:bg-green-50 transition-colors group-hover:border-neutral-300"
+                  >
+                    <Icon name="CheckCircle2" className="w-4 h-4 text-transparent group-hover:text-green-500 transition-colors" />
+                  </button>
+                  <div>
+                    <h3 className="font-bold text-neutral-900">{task.title}</h3>
+                    <div className="flex items-center gap-3 mt-1">
+                      <span className="text-xs text-neutral-400 flex items-center gap-1">
+                        <Icon name="Clock" className="w-3 h-3" />
+                        {task.duration}m
+                      </span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        task.difficulty === 'Elite' ? 'bg-purple-100 text-purple-700' :
+                        task.difficulty === 'Hard' ? 'bg-red-100 text-red-700' :
+                        task.difficulty === 'Medium' ? 'bg-amber-100 text-amber-700' :
+                        'bg-green-100 text-green-700'
+                      }`}>
+                        {task.difficulty}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 bg-amber-50 px-3 py-1.5 rounded-full">
+                  <Icon name="Zap" className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                  <span className="text-xs font-bold text-amber-700">+{task.xp}</span>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Upcoming Tasks */}
+      {upcomingTasks.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-xl font-bold text-neutral-900 mb-4">Upcoming</h2>
+          <div className="space-y-3">
+            {upcomingTasks.map((task) => (
+              <motion.div
+                key={task.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white border border-neutral-100 p-4 rounded-2xl shadow-sm flex items-center justify-between"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-2 h-2 rounded-full bg-neutral-300" />
+                  <div>
+                    <h3 className="font-medium text-neutral-900">{task.title}</h3>
+                    <p className="text-xs text-neutral-400">{formatDate(task.due_date)}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 text-amber-600">
+                  <Icon name="Zap" className="w-3 h-3" />
+                  <span className="text-xs font-bold">{task.xp}</span>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recently Completed */}
+      {recentlyCompleted.length > 0 && (
+        <div>
+          <h2 className="text-xl font-bold text-neutral-900 mb-4">Recently Completed</h2>
+          <div className="space-y-3">
+            {recentlyCompleted.map((task) => (
+              <motion.div
+                key={task.id}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="bg-neutral-50 border border-neutral-100 p-4 rounded-2xl flex items-center gap-3 opacity-75"
+              >
+                <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center">
+                  <Icon name="CheckCircle2" className="w-4 h-4 text-green-600" />
+                </div>
+                <span className="font-medium text-neutral-500 line-through">{task.title}</span>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
