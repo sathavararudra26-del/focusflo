@@ -1,0 +1,344 @@
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { base44 } from '@/api/base44Client';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import Icon from '@/components/shared/Icon';
+
+const RewardForm = ({ onSave, onCancel }) => {
+  const [title, setTitle] = useState('');
+  const [xpCost, setXpCost] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!title || !xpCost) return;
+    onSave({ title, xp_cost: parseInt(xpCost) });
+    setTitle('');
+    setXpCost('');
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="bg-white border-2 border-dashed border-neutral-200 p-6 rounded-2xl mb-6"
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-neutral-700">Reward Name</label>
+            <input
+              type="text"
+              placeholder="e.g. 15 min Break"
+              className="w-full px-4 py-3 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-neutral-700">XP Cost</label>
+            <div className="relative">
+              <Icon name="Zap" className="absolute left-3 top-3.5 w-4 h-4 text-neutral-400" />
+              <input
+                type="number"
+                placeholder="500"
+                className="w-full pl-10 pr-4 py-3 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+                value={xpCost}
+                onChange={(e) => setXpCost(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 text-neutral-600 hover:bg-neutral-100 rounded-lg font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="px-6 py-2 bg-neutral-900 text-white rounded-lg font-bold hover:bg-neutral-800 transition-colors"
+          >
+            Create Reward
+          </button>
+        </div>
+      </form>
+    </motion.div>
+  );
+};
+
+const RewardCard = ({ reward, availableXP, onRedeem, onDelete }) => {
+  const canAfford = availableXP >= reward.xp_cost;
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      className={`bg-white border border-neutral-100 rounded-2xl shadow-sm overflow-hidden transition-all ${
+        reward.is_unlocked ? 'opacity-60' : 'hover:border-neutral-200 hover:shadow-md'
+      }`}
+    >
+      <div className="p-5 flex items-start gap-4">
+        <div className={`p-3 rounded-xl ${reward.is_unlocked ? 'bg-neutral-200 text-neutral-500' : 'bg-neutral-100 text-neutral-900'}`}>
+          <Icon name="Gift" className="w-6 h-6" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-neutral-900 truncate">{reward.title}</h3>
+          <div className="flex items-center gap-1.5 mt-1">
+            <Icon name="Zap" className={`w-4 h-4 ${reward.is_unlocked ? 'text-neutral-400' : 'text-amber-500 fill-amber-500'}`} />
+            <span className={`text-sm font-bold ${reward.is_unlocked ? 'text-neutral-400' : 'text-amber-700'}`}>
+              {reward.xp_cost} XP
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {reward.is_unlocked ? (
+            <span className="flex items-center gap-1 text-green-600 text-sm font-medium">
+              <Icon name="CheckCircle2" className="w-4 h-4" />
+              Redeemed
+            </span>
+          ) : (
+            <>
+              <button
+                onClick={() => onRedeem(reward)}
+                disabled={!canAfford}
+                className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+                  canAfford
+                    ? 'bg-neutral-900 text-white hover:bg-neutral-800'
+                    : 'bg-neutral-100 text-neutral-400 cursor-not-allowed'
+                }`}
+              >
+                Redeem
+              </button>
+              <button
+                onClick={() => onDelete(reward.id)}
+                className="p-2 hover:bg-red-50 rounded-lg transition-colors"
+              >
+                <Icon name="Trash2" className="w-4 h-4 text-neutral-400 hover:text-red-500" />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      {!reward.is_unlocked && !canAfford && (
+        <div className="px-5 pb-4">
+          <p className="text-xs text-red-500 flex items-center gap-1">
+            <Icon name="X" className="w-3 h-3" />
+            Need {reward.xp_cost - availableXP} more XP
+          </p>
+        </div>
+      )}
+    </motion.div>
+  );
+};
+
+export default function Rewards() {
+  const [showForm, setShowForm] = useState(false);
+  const [filter, setFilter] = useState('available');
+  const queryClient = useQueryClient();
+
+  const { data: rewards = [] } = useQuery({
+    queryKey: ['rewards'],
+    queryFn: () => base44.entities.Reward.list('-created_date', 100)
+  });
+
+  const { data: userProgress } = useQuery({
+    queryKey: ['userProgress'],
+    queryFn: async () => {
+      const progress = await base44.entities.UserProgress.list();
+      return progress[0] || { total_xp: 0 };
+    }
+  });
+
+  const createRewardMutation = useMutation({
+    mutationFn: (data) => base44.entities.Reward.create({ ...data, is_unlocked: false }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rewards'] });
+      setShowForm(false);
+    }
+  });
+
+  const redeemRewardMutation = useMutation({
+    mutationFn: async (reward) => {
+      await base44.entities.Reward.update(reward.id, {
+        is_unlocked: true,
+        redeemed_date: new Date().toISOString().split('T')[0]
+      });
+      if (userProgress) {
+        await base44.entities.UserProgress.update(userProgress.id, {
+          total_xp: userProgress.total_xp - reward.xp_cost
+        });
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rewards'] });
+      queryClient.invalidateQueries({ queryKey: ['userProgress'] });
+    }
+  });
+
+  const deleteRewardMutation = useMutation({
+    mutationFn: (id) => base44.entities.Reward.delete(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['rewards'] })
+  });
+
+  const availableXP = userProgress?.total_xp || 0;
+  
+  const filteredRewards = filter === 'redeemed' 
+    ? rewards.filter(r => r.is_unlocked)
+    : rewards.filter(r => !r.is_unlocked);
+
+  const totalRedeemed = rewards.filter(r => r.is_unlocked).length;
+  const totalSpent = rewards.filter(r => r.is_unlocked).reduce((sum, r) => sum + r.xp_cost, 0);
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-8 md:py-12">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight">Rewards</h1>
+          <p className="text-neutral-500 mt-1">Redeem your hard-earned XP.</p>
+        </div>
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setShowForm(!showForm)}
+          className="flex items-center gap-2 px-6 py-3 bg-neutral-900 text-white font-bold rounded-full shadow-lg"
+        >
+          <Icon name="Plus" className="w-5 h-5" />
+          <span className="hidden sm:inline">New Reward</span>
+        </motion.button>
+      </div>
+
+      {/* XP Balance Card */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-neutral-900 text-white p-6 rounded-3xl mb-8"
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-neutral-400 text-sm font-medium">Available XP</p>
+            <div className="flex items-center gap-2 mt-1">
+              <Icon name="Zap" className="w-8 h-8 text-amber-400 fill-amber-400" />
+              <span className="text-4xl font-extrabold">{availableXP}</span>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-neutral-400 text-sm">{totalRedeemed} rewards redeemed</p>
+            <p className="text-neutral-400 text-sm">{totalSpent} XP spent</p>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Create Form */}
+      <AnimatePresence>
+        {showForm && (
+          <RewardForm
+            onSave={(data) => createRewardMutation.mutate(data)}
+            onCancel={() => setShowForm(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Filter Tabs */}
+      <div className="flex gap-2 mb-6">
+        <button
+          onClick={() => setFilter('available')}
+          className={`px-4 py-2 rounded-full text-sm font-bold transition-all ${
+            filter === 'available'
+              ? 'bg-neutral-900 text-white'
+              : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'
+          }`}
+        >
+          Available ({rewards.filter(r => !r.is_unlocked).length})
+        </button>
+        <button
+          onClick={() => setFilter('redeemed')}
+          className={`px-4 py-2 rounded-full text-sm font-bold transition-all ${
+            filter === 'redeemed'
+              ? 'bg-neutral-900 text-white'
+              : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'
+          }`}
+        >
+          Redeemed ({totalRedeemed})
+        </button>
+      </div>
+
+      {/* Rewards Grid */}
+      {filteredRewards.length === 0 ? (
+        <div className="bg-white border border-neutral-100 p-12 rounded-3xl text-center">
+          <div className="w-20 h-20 bg-neutral-100 rounded-3xl mx-auto mb-4 flex items-center justify-center">
+            <Icon name="Gift" className="w-10 h-10 text-neutral-400" />
+          </div>
+          <h3 className="text-xl font-bold text-neutral-900 mb-2">
+            {filter === 'redeemed' ? 'No redeemed rewards yet' : 'No rewards available'}
+          </h3>
+          <p className="text-neutral-500 mb-6">
+            {filter === 'redeemed' 
+              ? 'Complete tasks to earn XP and redeem rewards!' 
+              : 'Create custom rewards to motivate yourself.'}
+          </p>
+          {filter === 'available' && (
+            <button
+              onClick={() => setShowForm(true)}
+              className="px-6 py-3 bg-neutral-900 text-white font-bold rounded-full"
+            >
+              Create Reward
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="grid gap-4">
+          <AnimatePresence>
+            {filteredRewards.map(reward => (
+              <RewardCard
+                key={reward.id}
+                reward={reward}
+                availableXP={availableXP}
+                onRedeem={(r) => redeemRewardMutation.mutate(r)}
+                onDelete={(id) => deleteRewardMutation.mutate(id)}
+              />
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+
+      {/* Suggested Rewards */}
+      {rewards.filter(r => !r.is_unlocked).length === 0 && filter === 'available' && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+          className="mt-8"
+        >
+          <h3 className="font-bold text-neutral-900 mb-4">Suggested Rewards</h3>
+          <div className="grid md:grid-cols-3 gap-4">
+            {[
+              { title: '15 min Break', xp_cost: 100 },
+              { title: 'Favorite Snack', xp_cost: 250 },
+              { title: 'Episode of TV Show', xp_cost: 500 }
+            ].map((suggestion, i) => (
+              <button
+                key={i}
+                onClick={() => createRewardMutation.mutate(suggestion)}
+                className="bg-neutral-50 border border-neutral-100 p-4 rounded-2xl text-left hover:border-neutral-200 hover:bg-white transition-all"
+              >
+                <h4 className="font-medium text-neutral-900">{suggestion.title}</h4>
+                <div className="flex items-center gap-1 mt-1 text-amber-600">
+                  <Icon name="Zap" className="w-3 h-3" />
+                  <span className="text-sm font-bold">{suggestion.xp_cost} XP</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </motion.div>
+      )}
+    </div>
+  );
+}
